@@ -4,6 +4,11 @@ import './App.css'
 import { Signal, signal } from '@preact/signals-core';
 import { map } from './map';
 
+const Component = ({parentCount}) => {
+  const count = signal(1000);
+  return <div>some component {count} - {parentCount} <button onClick={() => count.value++}>increase it</button><button onClick={() => parentCount.value++}>increase parent</button></div>
+}
+
 function App() {
   const count = signal(0);
   const todos = signal([]);
@@ -39,6 +44,7 @@ function App() {
         <button onClick={() => count.value++} x-data={count}>
           count is {count}
         </button>
+        <Component parentCount={count} />
         <div>
           {map(todos, (todo) => <div>
             <div>
