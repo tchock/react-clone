@@ -1,9 +1,10 @@
 
 import './index.css'
-import { App } from './App'
+import { App, SuspenseRender } from './App'
 import { MapRender } from './map';
 import { JSX } from 'react/jsx-runtime';
 import { Signal } from '@preact/signals-core';
+import { Conditional } from './conditional';
 
 const FRAGMENT = Symbol.for('react.fragment');
 
@@ -17,22 +18,78 @@ const ensureArray = <T,>(value: T) => {
 const updateTextNode = (node: HTMLElement, value: string | number) => {
   if (node instanceof Text) {
     node.textContent = value.toString();
-  } else {
-    const textNode = document.createTextNode(value.toString());
-    node.parentElement.replaceChild(textNode, node);
+    return node;
   }
+  const textNode = document.createTextNode(value.toString());
+  node.parentElement.replaceChild(textNode, node);
+  return textNode;
 }
 
+const placeDomElements = (rootElement: HTMLElement, element: Text | Text[] | HTMLElement | HTMLElement[], previousElement: Text | Text[] | HTMLElement | HTMLElement[]) => {
+  if (element === previousElement) {
+    return;
+  }
 
-const renderNode = (rootElement: HTMLElement, element: JSX.Element | string | number | Signal) => {
+  const elements = ensureArray(element);
+  const previousElements = ensureArray(previousElement);
+
+  elements.forEach((element, index) => {
+    const previousElement = previousElements[index];
+    if (previousElement) {
+      rootElement.replaceChild(element, previousElement);
+    } else {
+      rootElement.appendChild(element);
+    }
+  });
+
+  previousElements.slice(elements.length).forEach((element) => {
+    rootElement.removeChild(element);
+  });
+}
+
+type RenderElement = JSX.Element | string | number | Signal | Promise<RenderElement>;
+
+const renderNode = (
+  rootElement: HTMLElement,
+  element: RenderElement | RenderElement[],
+  previousElement?: HTMLElement | HTMLElement[] | Text | Text[]
+) => {
+
+  if (element instanceof Promise) {
+    const placeholderNode = previousElement || document.createTextNode('');
+    placeDomElements(rootElement, placeholderNode, previousElement || []);
+    return element.then((resolvedResult) => renderNode(rootElement, resolvedResult, placeholderNode));
+  }
+
+  if (Array.isArray(element)) {
+    const previousElements = ensureArray(previousElement);
+    previousElements.slice(element.length).forEach((element) => {
+      rootElement.removeChild(element);
+    });
+    return element.map((child: JSX.Element, i: number) => renderNode(rootElement, child, previousElements[i]));
+  }
+
+  if (element instanceof HTMLElement) {
+    placeDomElements(rootElement, element, previousElement);
+    return element;
+  }
+
+  if (element instanceof Conditional) {
+    return element.initRender(rootElement, renderNode);
+  }
+
+  if (element instanceof SuspenseRender) {
+    return element.initRender(rootElement, renderNode, previousElement);
+  }
+
   if (element instanceof MapRender) {
     return element.initRender(rootElement, renderNode);
   }
 
   if (element instanceof Signal) {
-    const node = renderNode(rootElement, element.value);
+    let node = renderNode(rootElement, element.value, previousElement);
     element.subscribe((value) => {
-      updateTextNode(node, value);
+      node = updateTextNode(node, value);
     });
     return node;
   }
@@ -43,7 +100,7 @@ const renderNode = (rootElement: HTMLElement, element: JSX.Element | string | nu
 
   if (typeof element === 'string' || typeof element === 'number') {
     const textNode = document.createTextNode(element.toString());
-    rootElement.appendChild(textNode);
+    placeDomElements(rootElement, textNode, previousElement);
     return textNode;
   }
 
@@ -53,7 +110,7 @@ const renderNode = (rootElement: HTMLElement, element: JSX.Element | string | nu
 
   if (typeof element.type === 'function') {
     const result = element.type(element.props);
-    return renderNode(rootElement, result);
+    return renderNode(rootElement, result, previousElement);
   }
   
   if (typeof element.type === 'string') {
@@ -80,7 +137,7 @@ const renderNode = (rootElement: HTMLElement, element: JSX.Element | string | nu
         });
       }
     });
-    rootElement.appendChild(domElement);
+    placeDomElements(rootElement, domElement, previousElement);
     return domElement;
   }
 
@@ -98,3 +155,5 @@ const createRoot = (rootElement: HTMLElement) => {
 createRoot(document.getElementById('root')!).render(
     <App />
 )
+
+export { renderNode }

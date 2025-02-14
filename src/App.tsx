@@ -3,10 +3,32 @@ import viteLogo from '/vite.svg'
 import './App.css'
 import { Signal, signal } from '@preact/signals-core';
 import { map } from './map';
+import { conditional } from './conditional';
 
 const Component = ({parentCount}) => {
   const count = signal(1000);
   return <div>some component {count} - {parentCount} <button onClick={() => count.value++}>increase it</button><button onClick={() => parentCount.value++}>increase parent</button></div>
+}
+
+const AsyncComponent = async () => {
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  return <div>Async component</div>
+}
+
+class SuspenseRender {
+  constructor(public children: Promise<JSX.Element>, public fallback?: JSX.Element) {
+    this.children = children;
+    this.fallback = fallback;
+  }
+
+  initRender(parent: HTMLElement, renderNode: any, previousElement: any) {
+    const placeholderNode = renderNode(parent, this.fallback || '', previousElement);
+    return renderNode(parent, this.children, placeholderNode);
+  }
+}
+
+const Suspense = ({children, fallback}) => {
+  return new SuspenseRender(children, fallback);
 }
 
 function App() {
@@ -40,11 +62,21 @@ function App() {
         </a>
       </div>
       <h1>Vite + React</h1>
+      <Suspense fallback={<div>Loading...</div>}>
+        <AsyncComponent />
+      </Suspense>
       <div className="card">
         <button onClick={() => count.value++} x-data={count}>
           count is {count}
         </button>
-        <Component parentCount={count} />
+        <button onClick={() => count.value--} x-data={count}>
+          decrease
+        </button>
+        {conditional(
+          () => count.value > 10, 
+          <Component parentCount={count} />,
+          <div>count is less than 10</div>
+        )}
         <div>
           {map(todos, (todo) => <div>
             <div>
@@ -73,4 +105,5 @@ function App() {
 
 export {
   App,
+  SuspenseRender,
 }
