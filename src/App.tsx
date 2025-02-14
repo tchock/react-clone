@@ -3,7 +3,8 @@ import viteLogo from '/vite.svg'
 import './App.css'
 import { Signal, signal } from '@preact/signals-core';
 import { map } from './map';
-import { conditional } from './conditional';
+import { when } from './when';
+import { Suspense } from './suspense';
 
 const Component = ({parentCount}) => {
   const count = signal(1000);
@@ -13,22 +14,6 @@ const Component = ({parentCount}) => {
 const AsyncComponent = async () => {
   await new Promise((resolve) => setTimeout(resolve, 1000));
   return <div>Async component</div>
-}
-
-class SuspenseRender {
-  constructor(public children: Promise<JSX.Element>, public fallback?: JSX.Element) {
-    this.children = children;
-    this.fallback = fallback;
-  }
-
-  initRender(parent: HTMLElement, renderNode: any, previousElement: any) {
-    const placeholderNode = renderNode(parent, this.fallback || '', previousElement);
-    return renderNode(parent, this.children, placeholderNode);
-  }
-}
-
-const Suspense = ({children, fallback}) => {
-  return new SuspenseRender(children, fallback);
 }
 
 function App() {
@@ -72,21 +57,22 @@ function App() {
         <button onClick={() => count.value--} x-data={count}>
           decrease
         </button>
-        {conditional(
+        {when(
           () => count.value > 10, 
           <Component parentCount={count} />,
           <div>count is less than 10</div>
         )}
-        <div>
-          {map(todos, (todo) => <div>
+        {map(todos, (todo) => (
+          <div>
             <div>
               <input value={todo} onKeypress={e => {
                 todo.value = e.target.value;
               }} />
             </div>
             <div>{todo}</div>
-            <button onClick={() => deleteTodo(todo)}>delete</button></div>)}
-        </div>
+            <button onClick={() => deleteTodo(todo)}>delete</button>
+          </div>
+        ))}
 
         <button onClick={addOnTop}>Add on top</button>
         <button onClick={addOnBottom}>Add on bottom</button>
@@ -105,5 +91,4 @@ function App() {
 
 export {
   App,
-  SuspenseRender,
 }

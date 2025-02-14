@@ -4,7 +4,8 @@ import { App, SuspenseRender } from './App'
 import { MapRender } from './map';
 import { JSX } from 'react/jsx-runtime';
 import { Signal } from '@preact/signals-core';
-import { Conditional } from './conditional';
+import { Conditional } from './when';
+import { Renderer } from './renderer';
 
 const FRAGMENT = Symbol.for('react.fragment');
 
@@ -74,16 +75,13 @@ const renderNode = (
     return element;
   }
 
-  if (element instanceof Conditional) {
-    return element.initRender(rootElement, renderNode);
-  }
-
-  if (element instanceof SuspenseRender) {
-    return element.initRender(rootElement, renderNode, previousElement);
-  }
-
-  if (element instanceof MapRender) {
-    return element.initRender(rootElement, renderNode);
+  if (element instanceof Renderer) {
+    const renderFn = (elem, overrideElement) => renderNode(
+      rootElement,
+      elem,
+      overrideElement !== undefined ? overrideElement : previousElement
+    );
+    return element.init(renderFn, rootElement);
   }
 
   if (element instanceof Signal) {
