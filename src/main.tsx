@@ -1,10 +1,8 @@
 
 import './index.css'
-import { App, SuspenseRender } from './App'
-import { MapRender } from './map';
+import { App } from './App'
 import { JSX } from 'react/jsx-runtime';
 import { Signal } from '@preact/signals-core';
-import { Conditional } from './when';
 import { Renderer } from './renderer';
 
 const FRAGMENT = Symbol.for('react.fragment');
