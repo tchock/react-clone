@@ -14,6 +14,20 @@ const ensureArray = <T,>(value: T) => {
   return [value];
 }
 
+const setRef = (ref: Signal | ((value: any) => void), value: any) => {
+  if (ref) {
+    if (value instanceof Promise) {
+      value.then((resolvedValue) => setRef(ref, resolvedValue));
+      return;
+    }
+      if (typeof ref === 'function') {
+        ref(value);
+      } else if (ref instanceof Signal) {
+        ref.value = value;
+      }
+    }
+}
+
 const removeUnmountedSubscribers = (subscriptions: Map<Node, Array<() => void>>, node: Node) => {
   if (subscriptions.has(node)) {
     console.log('removing subscriptions', node);
@@ -170,17 +184,28 @@ const renderNode = (
   }
 
   if (element.type === FRAGMENT) {
-    return element.props.children.map((child: JSX.Element) => renderNode(rootElement, child, addSubscription));
+    const output = element.props.children.map((child: JSX.Element) => renderNode(rootElement, child, addSubscription));
+    setRef(element.props.ref, output);
+    return output;
   }
 
   if (typeof element.type === 'function') {
     const result = element.type(element.props);
-    return renderNode(rootElement, result, addSubscription, previousElement);
+    const renderOutput = renderNode(rootElement, result, addSubscription, previousElement);
+    console.log('element.props', element.props);
+    
+    setRef(element.props.ref, renderOutput);
+    return renderOutput;
   }
   
   if (typeof element.type === 'string') {
     const domElement = document.createElement(element.type);
+    
     Object.entries(element.props).forEach(([key, value]) => {
+      if (key === 'ref') {
+        setRef(value as any, domElement);
+        return;
+      }
       const transformedValue = value instanceof Signal ? value.value : value;
       setAttribute(domElement, element, addSubscription, key, transformedValue);
       if (value instanceof Signal) {

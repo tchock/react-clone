@@ -36,6 +36,11 @@ function App() {
     console.log(JSON.stringify(todos));
   }
 
+  const ref = signal(null);
+  ref.subscribe((value) => {
+    console.log('ref value', value);
+  });
+
   return (
     <>
       <div style={{backgroundColor: 'red'}}>
@@ -48,7 +53,7 @@ function App() {
       </div>
       <h1>Vite + React</h1>
       <Suspense fallback={<div>Loading...</div>}>
-        <AsyncComponent />
+        <AsyncComponent ref={ref} />
       </Suspense>
       <div className="card">
         <button onClick={() => count.value++} x-data={count}>
@@ -58,7 +63,7 @@ function App() {
           decrease
         </button>
         {when(
-          () => count.value > 10, 
+          () => count.value > 10,
           <Component parentCount={count} />,
           <div>count is less than 10</div>
         )}
