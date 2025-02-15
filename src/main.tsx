@@ -48,6 +48,26 @@ const placeDomElements = (rootElement: HTMLElement, element: Text | Text[] | HTM
 
 type RenderElement = JSX.Element | string | number | Signal | Promise<RenderElement>;
 
+const setAttribute = (domElement: HTMLElement, element: JSX.Element, key: string, value: any) => {
+  if (key.startsWith('on')) {
+    const eventName = key.substring(2).toLowerCase();
+    domElement.addEventListener(eventName, value as EventListener);
+  } else
+  if (key === 'children') {
+    ensureArray(element.props.children).forEach((child: JSX.Element) => {
+      renderNode(domElement, child);
+    });
+  } else if (key === 'style') {
+    Object.entries(value).forEach(([styleKey, styleValue]) => {
+      domElement.style[styleKey] = styleValue;
+    });
+  } else if (key === 'className') {
+    domElement.setAttribute('class', value.toString());
+  } else {
+    domElement.setAttribute(key, value.toString());
+  }
+}
+
 const renderNode = (
   rootElement: HTMLElement,
   element: RenderElement | RenderElement[],
@@ -112,24 +132,11 @@ const renderNode = (
   if (typeof element.type === 'string') {
     const domElement = document.createElement(element.type);
     Object.entries(element.props).forEach(([key, value]) => {
-      if (key.startsWith('on')) {
-        const eventName = key.substring(2).toLowerCase();
-        domElement.addEventListener(eventName, value as EventListener);
-      } else
-      if (key === 'children') {
-        ensureArray(element.props.children).forEach((child: JSX.Element) => {
-          renderNode(domElement, child);
-        });
-      } else if (key === 'style') {
-        console.log('style', value);
-      } else if (key === 'className') {
-        domElement.setAttribute('class', value);
-      } else if (typeof value === 'string' || typeof value === 'number') {
-        domElement.setAttribute(key, value.toString());
-      } else if (value instanceof Signal) {
-        domElement.setAttribute(key, value.toString());
+      const transformedValue = value instanceof Signal ? value.value : value;
+      setAttribute(domElement, element, key, transformedValue);
+      if (value instanceof Signal) {
         value.subscribe((newValue) => {
-          domElement.setAttribute(key, newValue.toString());
+          setAttribute(domElement, element, key, newValue);
         });
       }
     });
