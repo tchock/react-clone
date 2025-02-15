@@ -14,6 +14,53 @@ const ensureArray = <T,>(value: T) => {
   return [value];
 }
 
+const removeUnmountedSubscribers = (subscriptions: Map<Node, Array<() => void>>, node: Node) => {
+  if (subscriptions.has(node)) {
+    console.log('removing subscriptions', node);
+    
+    subscriptions.get(node).forEach((unsubscribeFn) => unsubscribeFn());
+    subscriptions.delete(node);
+  }
+  node.childNodes.forEach((childNode) => removeUnmountedSubscribers(subscriptions, childNode));
+}
+
+type AddSubscriptionFn = (domElement: HTMLElement, unsubscribeFn: () => void) => void;
+
+const handleUnmount = (rootElement: HTMLElement) => {
+  const subscriptions = new Map<Node, Array<() => void>>();
+  const observer = new MutationObserver((mutationsList) => {
+    for(const mutation of mutationsList) {
+      if (mutation.type === 'childList' && mutation.removedNodes.length > 0) {  
+        mutation.removedNodes.forEach((node) => {
+          if (node.parentElement) {
+            return
+          }
+
+          if (node === rootElement) {
+            subscriptions.forEach((subscribers) => subscribers.forEach((unsubscribeFn) => unsubscribeFn()));
+            subscriptions.clear();
+          }
+          removeUnmountedSubscribers(subscriptions, node);
+        });
+      }
+    }
+  });
+
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  const addSubscription: AddSubscriptionFn = (domElement, unsubscribeFn) => {
+    const previousSubscriptions = subscriptions.get(domElement) || [];
+    subscriptions.set(domElement, [...previousSubscriptions, unsubscribeFn]);
+  }
+
+  return {
+    addSubscription,
+    disconnect() {
+      observer.disconnect();
+    }
+  }
+}
+
 const updateTextNode = (node: HTMLElement, value: string | number) => {
   if (node instanceof Text) {
     node.textContent = value.toString();
@@ -48,14 +95,14 @@ const placeDomElements = (rootElement: HTMLElement, element: Text | Text[] | HTM
 
 type RenderElement = JSX.Element | string | number | Signal | Promise<RenderElement>;
 
-const setAttribute = (domElement: HTMLElement, element: JSX.Element, key: string, value: any) => {
+const setAttribute = (domElement: HTMLElement, element: JSX.Element, addSubscription: AddSubscriptionFn, key: string, value: any) => {
   if (key.startsWith('on')) {
     const eventName = key.substring(2).toLowerCase();
     domElement.addEventListener(eventName, value as EventListener);
   } else
   if (key === 'children') {
     ensureArray(element.props.children).forEach((child: JSX.Element) => {
-      renderNode(domElement, child);
+      renderNode(domElement, child, addSubscription);
     });
   } else if (key === 'style') {
     Object.entries(value).forEach(([styleKey, styleValue]) => {
@@ -71,13 +118,14 @@ const setAttribute = (domElement: HTMLElement, element: JSX.Element, key: string
 const renderNode = (
   rootElement: HTMLElement,
   element: RenderElement | RenderElement[],
-  previousElement?: HTMLElement | HTMLElement[] | Text | Text[]
+  addSubscription: (domElement: HTMLElement, unsubscribeFn: () => void) => void,
+  previousElement?: HTMLElement | HTMLElement[] | Text | Text[],
 ) => {
 
   if (element instanceof Promise) {
     const placeholderNode = previousElement || document.createTextNode('');
     placeDomElements(rootElement, placeholderNode, previousElement || []);
-    return element.then((resolvedResult) => renderNode(rootElement, resolvedResult, placeholderNode));
+    return element.then((resolvedResult) => renderNode(rootElement, resolvedResult, addSubscription, placeholderNode));
   }
 
   if (Array.isArray(element)) {
@@ -85,7 +133,7 @@ const renderNode = (
     previousElements.slice(element.length).forEach((element) => {
       rootElement.removeChild(element);
     });
-    return element.map((child: JSX.Element, i: number) => renderNode(rootElement, child, previousElements[i]));
+    return element.map((child: JSX.Element, i: number) => renderNode(rootElement, child, addSubscription, previousElements[i]));
   }
 
   if (element instanceof HTMLElement) {
@@ -97,16 +145,17 @@ const renderNode = (
     const renderFn = (elem, overrideElement) => renderNode(
       rootElement,
       elem,
+      addSubscription,
       overrideElement !== undefined ? overrideElement : previousElement
     );
-    return element.init(renderFn, rootElement);
+    return element.init(renderFn, addSubscription, rootElement);
   }
 
   if (element instanceof Signal) {
-    let node = renderNode(rootElement, element.value, previousElement);
-    element.subscribe((value) => {
+    let node = renderNode(rootElement, element.value, addSubscription, previousElement);
+    addSubscription(rootElement, element.subscribe((value) => {
       node = updateTextNode(node, value);
-    });
+    }));
     return node;
   }
   
@@ -121,23 +170,23 @@ const renderNode = (
   }
 
   if (element.type === FRAGMENT) {
-    return element.props.children.map((child: JSX.Element) => renderNode(rootElement, child));
+    return element.props.children.map((child: JSX.Element) => renderNode(rootElement, child, addSubscription));
   }
 
   if (typeof element.type === 'function') {
     const result = element.type(element.props);
-    return renderNode(rootElement, result, previousElement);
+    return renderNode(rootElement, result, addSubscription, previousElement);
   }
   
   if (typeof element.type === 'string') {
     const domElement = document.createElement(element.type);
     Object.entries(element.props).forEach(([key, value]) => {
       const transformedValue = value instanceof Signal ? value.value : value;
-      setAttribute(domElement, element, key, transformedValue);
+      setAttribute(domElement, element, addSubscription, key, transformedValue);
       if (value instanceof Signal) {
-        value.subscribe((newValue) => {
-          setAttribute(domElement, element, key, newValue);
-        });
+        addSubscription(domElement, value.subscribe((newValue) => {
+          setAttribute(domElement, element, addSubscription, key, newValue);
+        }));
       }
     });
     placeDomElements(rootElement, domElement, previousElement);
@@ -148,9 +197,11 @@ const renderNode = (
 }
 
 const createRoot = (rootElement: HTMLElement) => {
+  
+  const { addSubscription } = handleUnmount(rootElement);
   return {
     render(element: JSX.Element) {
-      renderNode(rootElement, element);
+      renderNode(rootElement, element, addSubscription);
     }
   }
 };

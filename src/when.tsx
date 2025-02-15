@@ -14,10 +14,10 @@ interface ConditionalProps {
   ifFalse: () => any;
 }
 
-const whenRenderer = createRenderer<ConditionalProps>((props, renderNode) => {
+const whenRenderer = createRenderer<ConditionalProps>((props, renderNode, addSubscription, parent) => {
   let lastConditionResult = props.condition();
     let lastRenderResult: HTMLElement | null = null;
-    effect(() => {
+    addSubscription(parent, effect(() => {
       const conditionResult = props.condition();
       if (lastConditionResult === conditionResult) {
         return;
@@ -27,7 +27,7 @@ const whenRenderer = createRenderer<ConditionalProps>((props, renderNode) => {
         untracked(() => renderAsComponent(conditionResult ? props.ifTrue : props.ifFalse)),
         lastRenderResult
       );
-    });
+    }));
 
     const result = renderAsComponent(lastConditionResult ? props.ifTrue : props.ifFalse);
     lastRenderResult = renderNode(result);

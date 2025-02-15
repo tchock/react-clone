@@ -12,7 +12,7 @@ interface MapProps<T> {
   version: Signal<number>;
 }
 
-const map = <T,>(list: Signal<T[]>, renderFn: RenderFn<T>) => createRenderer<MapProps<T>>((props, renderFn, parent) => {
+const map = <T,>(list: Signal<T[]>, renderFn: RenderFn<T>) => createRenderer<MapProps<T>>((props, renderFn, addSubscription, parent) => {
   const initialOutput = props.list.value.map((item, index) => {
     const inputValue = item instanceof Signal ? item.value : item;
     const element = renderFn(props.renderFn(inputValue, index));
@@ -27,7 +27,7 @@ const map = <T,>(list: Signal<T[]>, renderFn: RenderFn<T>) => createRenderer<Map
     cache.end();
   });
 
-  props.list.subscribe((newList) => {
+  addSubscription(parent, props.list.subscribe((newList) => {
     props.version.value += 1;
     props.renderCache.forEach((cache) => {
       cache.start(props.version.value);
@@ -71,7 +71,7 @@ const map = <T,>(list: Signal<T[]>, renderFn: RenderFn<T>) => createRenderer<Map
         currentChildNode = currentChildNode.nextSibling;
       }
     });
-  });
+  }));
 
   return initialOutput;
 })({
