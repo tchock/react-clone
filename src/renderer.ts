@@ -1,6 +1,6 @@
 type RenderOutput = HTMLElement | HTMLElement[] | Text | Text[] | null;
 
-type RendererInitFn<T> = (props: T, renderFn: any, addSubscription: any, parent?: HTMLElement) => RenderOutput;
+type RendererInitFn<T> = (props: T, renderFn: any, renderContext: any, parent?: HTMLElement) => RenderOutput;
 
 class Renderer<T> {
   constructor(initFn: RendererInitFn<T>, props: T) {
@@ -11,8 +11,8 @@ class Renderer<T> {
   private props: T;
   private initFn: RendererInitFn<T>;
 
-  init(renderFn: any, addSubscription: any, parent?: HTMLElement) {
-    return this.initFn(this.props, renderFn, addSubscription, parent);
+  init(renderFn: any, renderContext: any, parent?: HTMLElement) {
+    return this.initFn(this.props, renderFn, renderContext, parent);
   }
 }
 

@@ -1,5 +1,6 @@
 import { effect, untracked } from "@preact/signals-core";
 import { createRenderer } from "./renderer";
+import { getRenderContextByDom } from "./render-context";
 
 const renderAsComponent = (Case) => {
   if (typeof Case === 'function') {
@@ -14,10 +15,10 @@ interface ConditionalProps {
   ifFalse: () => any;
 }
 
-const whenRenderer = createRenderer<ConditionalProps>((props, renderNode, addSubscription, parent) => {
+const whenRenderer = createRenderer<ConditionalProps>((props, renderNode, renderContext, parent) => {
   let lastConditionResult = props.condition();
     let lastRenderResult: HTMLElement | null = null;
-    addSubscription(parent, effect(() => {
+    renderContext.onCleanup(effect(() => {
       const conditionResult = props.condition();
       if (lastConditionResult === conditionResult) {
         return;

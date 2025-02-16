@@ -2,6 +2,7 @@ import { Signal } from "@preact/signals-core";
 import { JSX } from 'react/jsx-runtime';
 import { RenderCache } from "./render-cache";
 import { createRenderer } from "./renderer";
+import { getRenderContextByDom } from "./render-context";
 
 type RenderFn<T> = (item: T, index: number) => JSX.Element;
 
@@ -12,21 +13,13 @@ interface MapProps<T> {
   version: Signal<number>;
 }
 
-const map = <T,>(list: Signal<T[]>, renderFn: RenderFn<T>) => createRenderer<MapProps<T>>((props, renderFn, addSubscription, parent) => {
-  const initialOutput = props.list.value.map((item, index) => {
-    const element = renderFn(props.renderFn(item, index));
-    const renderCache = new RenderCache();
-    
-    renderCache.start(props.version.value);
-    props.renderCache.set(item, renderCache);
-    renderCache.add(element);
-    return element;
-  });
+const map = <T,>(list: Signal<T[]>, renderFn: RenderFn<T>) => createRenderer<MapProps<T>>((props, renderFn, renderContext, parent) => {
+  let renderOutput;
   props.renderCache.forEach((cache) => {
     cache.end();
   });
 
-  addSubscription(parent, props.list.subscribe((newList) => {
+  renderContext.onCleanup(props.list.subscribe((newList) => {
     props.version.value += 1;
     props.renderCache.forEach((cache) => {
       cache.start(props.version.value);
@@ -52,7 +45,10 @@ const map = <T,>(list: Signal<T[]>, renderFn: RenderFn<T>) => createRenderer<Map
     });
     props.renderCache.forEach((cache, key) => {
       cache.end();
-      const hasMore = cache.cleanup();
+      const hasMore = cache.cleanup((node) => {
+        const nodeRenderContext = getRenderContextByDom(node);
+        nodeRenderContext.cleanup();
+      });
       
       if (!hasMore) {
         props.renderCache.delete(key);
@@ -70,9 +66,10 @@ const map = <T,>(list: Signal<T[]>, renderFn: RenderFn<T>) => createRenderer<Map
         currentChildNode = currentChildNode.nextSibling;
       }
     });
+    renderOutput = newChildren;
   }));
 
-  return initialOutput;
+  return renderOutput;
 })({
   list,
   renderFn,

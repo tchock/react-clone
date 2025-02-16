@@ -77,10 +77,11 @@ class RenderCache {
     }
   }
 
-  cleanup() {
+  cleanup(cb: (node: HTMLElement) => void) {
     const node = this._recentUnused;
     const nextNode = node?.next || null;
     if (node) {
+      cb(node.element);
       unlinkLeftCacheNodes(this._recentUnused);
       this._head = nextNode;
       if (this._tail === node) {

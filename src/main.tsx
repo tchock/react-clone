@@ -4,6 +4,7 @@ import { App } from './App'
 import { JSX } from 'react/jsx-runtime';
 import { Signal } from '@preact/signals-core';
 import { Renderer } from './renderer';
+import { createRenderContext, getRenderContextByDom, linkDomToRenderContext, RenderContext } from './render-context';
 
 const FRAGMENT = Symbol.for('react.fragment');
 
@@ -28,50 +29,42 @@ const setRef = (ref: Signal | ((value: any) => void), value: any) => {
     }
 }
 
-const removeUnmountedSubscribers = (subscriptions: Map<Node, Array<() => void>>, node: Node) => {
-  if (subscriptions.has(node)) {
-    console.log('removing subscriptions', node);
+const cascadeCleanup = (cleanupHandlers: Map<any, (() => void)[]>, renderContext: RenderContext) => {
+  if (cleanupHandlers.has(renderContext)) {
     
-    subscriptions.get(node).forEach((unsubscribeFn) => unsubscribeFn());
-    subscriptions.delete(node);
+    cleanupHandlers.get(renderContext).forEach((cleanupFn) => {
+      cleanupFn();
+    });
+    cleanupHandlers.delete(renderContext);
   }
-  node.childNodes.forEach((childNode) => removeUnmountedSubscribers(subscriptions, childNode));
+  renderContext.children.forEach((childContext) => cascadeCleanup(cleanupHandlers, childContext));
+  renderContext.children = [];
 }
 
-type AddSubscriptionFn = (domElement: HTMLElement, unsubscribeFn: () => void) => void;
+type OnCleanupFn = (unsubscribeFn: () => void, renderContext: RenderContext) => void;
 
-const handleUnmount = (rootElement: HTMLElement) => {
-  const subscriptions = new Map<Node, Array<() => void>>();
-  const observer = new MutationObserver((mutationsList) => {
-    for(const mutation of mutationsList) {
-      if (mutation.type === 'childList' && mutation.removedNodes.length > 0) {  
-        mutation.removedNodes.forEach((node) => {
-          if (node.parentElement) {
-            return
-          }
-
-          if (node === rootElement) {
-            subscriptions.forEach((subscribers) => subscribers.forEach((unsubscribeFn) => unsubscribeFn()));
-            subscriptions.clear();
-          }
-          removeUnmountedSubscribers(subscriptions, node);
-        });
-      }
-    }
-  });
-
-  observer.observe(document.body, { childList: true, subtree: true });
-
-  const addSubscription: AddSubscriptionFn = (domElement, unsubscribeFn) => {
-    const previousSubscriptions = subscriptions.get(domElement) || [];
-    subscriptions.set(domElement, [...previousSubscriptions, unsubscribeFn]);
+const handleUnmount = () => {
+  const cleanupHandlers = new Map<any, (() => void)[]>();
+  
+  const cleanup = (renderContext: RenderContext) => {
+    renderContext.parent.children = renderContext.parent.children.filter((childContext) => childContext !== renderContext);
+    cascadeCleanup(cleanupHandlers, renderContext);
+  }
+  
+  const onCleanup: OnCleanupFn = (cleanupFn, identifier) => {
+    const prevValue = cleanupHandlers.get(identifier);
+    cleanupHandlers.set(identifier, [...prevValue, cleanupFn]);
   }
 
+  const registerRenderContext = (renderContext: RenderContext) => {
+    cleanupHandlers.set(renderContext, []);
+  }
+
+
   return {
-    addSubscription,
-    disconnect() {
-      observer.disconnect();
-    }
+    onCleanup,
+    cleanup,
+    registerRenderContext,
   }
 }
 
@@ -99,15 +92,14 @@ const placeDomElements = (rootElement: HTMLElement, element: Text | Text[] | HTM
 
 type RenderElement = JSX.Element | string | number | Signal | Promise<RenderElement>;
 
-const setAttribute = (domElement: HTMLElement, element: JSX.Element, addSubscription: AddSubscriptionFn, key: string, value: any) => {
-  
+const setAttribute = (renderContext: RenderContext, domElement: HTMLElement, element: JSX.Element, key: string, value: any) => {
   if (key.startsWith('on')) {
     const eventName = key.substring(2).toLowerCase();
     domElement.addEventListener(eventName, value as EventListener);
   } else
   if (key === 'children') {
     ensureArray(element.props.children).forEach((child: JSX.Element) => {
-      renderNode(domElement, child, addSubscription);
+      renderNode(renderContext, domElement, child);
     });
   } else if (key === 'style') {
     Object.entries(value).forEach(([styleKey, styleValue]) => {
@@ -120,46 +112,46 @@ const setAttribute = (domElement: HTMLElement, element: JSX.Element, addSubscrip
   }
 }
 
-const renderNode = (
-  rootElement: HTMLElement,
+const renderNodeInner = (
+  parentRenderContext: RenderContext,
+  parent: HTMLElement,
   element: RenderElement | RenderElement[],
-  addSubscription: (domElement: HTMLElement, unsubscribeFn: () => void) => void,
   previousElement?: HTMLElement | HTMLElement[] | Text | Text[],
 ) => {
 
   if (element instanceof Promise) {
     const placeholderNode = previousElement || document.createTextNode('');
-    placeDomElements(rootElement, placeholderNode, previousElement || []);
-    return element.then((resolvedResult) => renderNode(rootElement, resolvedResult, addSubscription, placeholderNode));
+    placeDomElements(parent, placeholderNode, previousElement || []);
+    return element.then((resolvedResult) => renderNode(parentRenderContext, parent, resolvedResult, placeholderNode));
   }
 
   if (Array.isArray(element)) {
     const previousElements = ensureArray(previousElement);
     previousElements.slice(element.length).forEach((element) => {
-      rootElement.removeChild(element);
+      parent.removeChild(element);
     });
-    return element.map((child: JSX.Element, i: number) => renderNode(rootElement, child, addSubscription, previousElements[i]));
+    return element.map((child: JSX.Element, i: number) => renderNode(parentRenderContext, parent, child, previousElements[i]));
   }
 
   if (element instanceof HTMLElement) {
-    placeDomElements(rootElement, element, previousElement);
+    placeDomElements(parent, element, previousElement);
     return element;
   }
 
   if (element instanceof Renderer) {
     const renderFn = (elem, overrideElement) => renderNode(
-      rootElement,
+      parentRenderContext,
+      parent,
       elem,
-      addSubscription,
       overrideElement !== undefined ? overrideElement : previousElement
     );
-    return element.init(renderFn, addSubscription, rootElement);
+    return element.init(renderFn, parentRenderContext, parent);
   }
 
   if (element instanceof Signal) {
     let node;
-    addSubscription(rootElement, element.subscribe((value) => {
-      node = renderNode(rootElement, value, addSubscription, node || previousElement)
+    parentRenderContext.onCleanup(element.subscribe((value) => {
+      node = renderNode(parentRenderContext, parent, value, node || previousElement)
     }));
     return node;
   }
@@ -170,26 +162,31 @@ const renderNode = (
 
   if (typeof element === 'string' || typeof element === 'number') {
     const textNode = document.createTextNode(element.toString());
-    placeDomElements(rootElement, textNode, previousElement);
+    placeDomElements(parent, textNode, previousElement);
     return textNode;
   }
 
   if (element.type === FRAGMENT) {
-    const output = element.props.children.map((child: JSX.Element) => renderNode(rootElement, child, addSubscription));
+    const output = element.props.children.map((child: JSX.Element) => renderNode(parentRenderContext, parent, child));
     setRef(element.props.ref, output);
     return output;
   }
 
   if (typeof element.type === 'function') {
     const result = element.type(element.props);
-    const renderOutput = renderNode(rootElement, result, addSubscription, previousElement);
+    const renderContext = createRenderContext(parentRenderContext);
+    const renderOutput = renderNode(renderContext, parent,result, previousElement);
+    if (renderOutput instanceof HTMLElement) {
+      linkDomToRenderContext(renderOutput, renderContext);
+    }
     setRef(element.props.ref, renderOutput);
     return renderOutput;
   }
   
   if (typeof element.type === 'string') {
     const domElement = document.createElement(element.type);
-    
+    const renderContext = createRenderContext(parentRenderContext);
+    linkDomToRenderContext(domElement, renderContext);
     Object.entries(element.props).forEach(([key, value]) => {
       if (key === 'ref') {
         setRef(value as any, domElement);
@@ -197,26 +194,50 @@ const renderNode = (
       }
       const handleSignal = value instanceof Signal && key !== 'children';
       if (handleSignal) {
-        addSubscription(domElement, value.subscribe((newValue) => {
-          setAttribute(domElement, element, addSubscription, key, newValue);
+        renderContext.onCleanup(value.subscribe((newValue) => {
+          setAttribute(renderContext, domElement, element, key, newValue);
         }));
       } else {
-        setAttribute(domElement, element, addSubscription, key, value);
+        setAttribute(renderContext, domElement, element, key, value);
       }
     });
-    placeDomElements(rootElement, domElement, previousElement);
+    placeDomElements(parent, domElement, previousElement);
     return domElement;
   }
 
   return null;
 }
 
+const renderNode = (
+  parentRenderContext: RenderContext,
+  parent: HTMLElement,
+  element: RenderElement | RenderElement[],
+  previousElement?: HTMLElement | HTMLElement[] | Text | Text[],
+) => {
+  if (previousElement instanceof HTMLElement) {
+    const previousRenderContext = getRenderContextByDom(previousElement);
+    if (previousRenderContext) {
+      previousRenderContext.cleanup();
+    }
+  }
+
+  return renderNodeInner(parentRenderContext, parent, element, previousElement);  
+}
+
 const createRoot = (rootElement: HTMLElement) => {
-  
-  const { addSubscription } = handleUnmount(rootElement);
+  const { onCleanup, cleanup, registerRenderContext } = handleUnmount();
+  const rootRenderContext = createRenderContext({
+    onCleanup: (unsubscribeFn, renderContext) => {
+      return onCleanup(unsubscribeFn, renderContext || rootRenderContext);
+    },
+    cleanup: (renderContext) => cleanup(renderContext),
+    children: [],
+    registerRenderContext,
+    parent: null,
+  });
   return {
     render(element: JSX.Element) {
-      renderNode(rootElement, element, addSubscription);
+      renderNode(rootRenderContext, rootElement, element);
     }
   }
 };
