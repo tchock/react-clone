@@ -18,7 +18,7 @@ const AsyncComponent = async () => {
 
 function App() {
   const count = signal(0);
-  const todos = signal([]);
+  const todos = signal([signal('aaa')]);
 
   const addOnTop = () => {
     todos.value = [signal('Something to do'), ...todos.value];
@@ -70,7 +70,7 @@ function App() {
         {map(todos, (todo) => (
           <div>
             <div>
-              <input value={todo} onKeypress={e => {
+              <input value={todo} onInput={e => { 
                 todo.value = e.target.value;
               }} />
             </div>

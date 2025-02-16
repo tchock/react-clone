@@ -75,16 +75,6 @@ const handleUnmount = (rootElement: HTMLElement) => {
   }
 }
 
-const updateTextNode = (node: HTMLElement, value: string | number) => {
-  if (node instanceof Text) {
-    node.textContent = value.toString();
-    return node;
-  }
-  const textNode = document.createTextNode(value.toString());
-  node.parentElement.replaceChild(textNode, node);
-  return textNode;
-}
-
 const placeDomElements = (rootElement: HTMLElement, element: Text | Text[] | HTMLElement | HTMLElement[], previousElement: Text | Text[] | HTMLElement | HTMLElement[]) => {
   if (element === previousElement) {
     return;
@@ -110,6 +100,7 @@ const placeDomElements = (rootElement: HTMLElement, element: Text | Text[] | HTM
 type RenderElement = JSX.Element | string | number | Signal | Promise<RenderElement>;
 
 const setAttribute = (domElement: HTMLElement, element: JSX.Element, addSubscription: AddSubscriptionFn, key: string, value: any) => {
+  
   if (key.startsWith('on')) {
     const eventName = key.substring(2).toLowerCase();
     domElement.addEventListener(eventName, value as EventListener);
@@ -166,9 +157,9 @@ const renderNode = (
   }
 
   if (element instanceof Signal) {
-    let node = renderNode(rootElement, element.value, addSubscription, previousElement);
+    let node;
     addSubscription(rootElement, element.subscribe((value) => {
-      node = updateTextNode(node, value);
+      node = renderNode(rootElement, value, addSubscription, node || previousElement)
     }));
     return node;
   }
@@ -192,8 +183,6 @@ const renderNode = (
   if (typeof element.type === 'function') {
     const result = element.type(element.props);
     const renderOutput = renderNode(rootElement, result, addSubscription, previousElement);
-    console.log('element.props', element.props);
-    
     setRef(element.props.ref, renderOutput);
     return renderOutput;
   }
@@ -206,12 +195,13 @@ const renderNode = (
         setRef(value as any, domElement);
         return;
       }
-      const transformedValue = value instanceof Signal ? value.value : value;
-      setAttribute(domElement, element, addSubscription, key, transformedValue);
-      if (value instanceof Signal) {
+      const handleSignal = value instanceof Signal && key !== 'children';
+      if (handleSignal) {
         addSubscription(domElement, value.subscribe((newValue) => {
           setAttribute(domElement, element, addSubscription, key, newValue);
         }));
+      } else {
+        setAttribute(domElement, element, addSubscription, key, value);
       }
     });
     placeDomElements(rootElement, domElement, previousElement);

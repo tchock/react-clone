@@ -14,8 +14,7 @@ interface MapProps<T> {
 
 const map = <T,>(list: Signal<T[]>, renderFn: RenderFn<T>) => createRenderer<MapProps<T>>((props, renderFn, addSubscription, parent) => {
   const initialOutput = props.list.value.map((item, index) => {
-    const inputValue = item instanceof Signal ? item.value : item;
-    const element = renderFn(props.renderFn(inputValue, index));
+    const element = renderFn(props.renderFn(item, index));
     const renderCache = new RenderCache();
     
     renderCache.start(props.version.value);
